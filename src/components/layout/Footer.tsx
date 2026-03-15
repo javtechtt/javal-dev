@@ -8,7 +8,7 @@ const footerLinks = [
 ];
 
 const socialLinks = [
-  { icon: Github, href: 'https://github.com', label: 'GitHub' },
+  { icon: Github, href: 'https://github.com/javtechtt', label: 'GitHub' },
   { icon: Linkedin, href: 'https://www.linkedin.com/in/javaljoseph/', label: 'LinkedIn' },
 ];
 

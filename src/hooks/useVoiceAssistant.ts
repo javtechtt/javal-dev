@@ -67,7 +67,6 @@ scroll_to_section targets:
 - "projects" → portfolio gallery, show me the work, take me to projects
 - "about" → about section, about page, who is Javal, background, bio, skills
 - "services" → services section, what do you offer, capabilities, what can you do
-- "testimonials" → testimonials, what clients say, reviews
 - "contact" → contact section, hire, reach out, get in touch, work together
 
 navigate_to_page paths:
@@ -116,7 +115,7 @@ const SCROLL_TOOL = {
     properties: {
       section: {
         type: 'string',
-        enum: ['hero', 'projects', 'about', 'services', 'testimonials', 'contact'],
+        enum: ['hero', 'projects', 'about', 'services', 'contact'],
         description: 'The homepage section to scroll to.',
       },
     },

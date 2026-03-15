@@ -3,7 +3,7 @@ import FeaturedProjects from '@/components/sections/FeaturedProjects';
 import ProjectGallery from '@/components/sections/ProjectGallery';
 import AboutSection from '@/components/sections/AboutSection';
 import ServicesSection from '@/components/sections/ServicesSection';
-import TestimonialsSection from '@/components/sections/TestimonialsSection';
+// import TestimonialsSection from '@/components/sections/TestimonialsSection';
 import ContactSection from '@/components/sections/ContactSection';
 
 export default function HomePage() {
@@ -49,8 +49,8 @@ export default function HomePage() {
         <div className="h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
       </div>
 
-      {/* Testimonials */}
-      <TestimonialsSection />
+      {/* Testimonials — hidden until real testimonials are provided */}
+      {/* <TestimonialsSection /> */}
 
       {/* Divider */}
       <div className="max-w-7xl mx-auto px-6">
