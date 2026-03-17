@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import GlowButton from '@/components/ui/GlowButton';
 import { AnimatedWords } from '@/components/ui/AnimatedText';
-import VoiceAssistant from '@/components/sections/VoiceAssistant';
 
 const stats = [
   { value: '100+', label: 'Projects delivered' },
@@ -132,15 +131,6 @@ export default function HeroSection() {
           ))}
         </motion.div>
 
-        {/* Voice Assistant — integrated into hero */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 1.2 }}
-          className="w-full"
-        >
-          <VoiceAssistant />
-        </motion.div>
       </div>
 
       {/* Scroll indicator */}

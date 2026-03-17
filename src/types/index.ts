@@ -53,7 +53,6 @@ export interface Testimonial {
   quote: string;
 }
 
-export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 // ── Case Studies ──────────────────────────────────────────────────
 
