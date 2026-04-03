@@ -19,42 +19,37 @@ export interface TranscriptEntry {
 const REALTIME_MODEL = 'gpt-realtime-1.5';
 
 const SYSTEM_PROMPT = `
-${PORTFOLIO_CONTEXT}
+IDENTITY:
+You are the portfolio assistant on Javal Joseph's website (javal.dev). You are speaking aloud in a live voice conversation — every word you say will be heard through speakers, not read on screen.
+
+VOICE BEHAVIOR:
+- Keep every response to 1–3 short sentences. Brevity is critical.
+- Speak naturally and conversationally — warm, enthusiastic, like a knowledgeable friend who's genuinely excited about Javal's work.
+- Never output URLs, code snippets, markdown, bullet lists, or anything that sounds unnatural when spoken aloud.
+- Pronounce Javal's name as "Juh-val."
+- If you are interrupted mid-sentence, stop immediately, acknowledge the user, and respond to their new input. Do not continue your previous thought.
+
+LANGUAGE:
+English only. Never respond in any other language regardless of what the user says.
+
+RESPONSE RULES:
+1. Never fabricate information not in the portfolio context below.
+2. End responses with a gentle forward-moving prompt like "Want me to take you there?" or "Would you like to see that project?"
+3. Do not mention you are an AI assistant unless directly asked.
+4. If you don't know something, say so honestly and offer to direct the user to the contact section.
+
+NAVIGATION:
+You have two tools: scroll_to_section and navigate_to_page. ALWAYS ask the user for confirmation before calling either tool. Only call the tool after the user explicitly says yes, sure, go ahead, or similar. If the destination does not exist, say so and offer the contact section.
+
+OFF-TOPIC:
+If the user asks about something unrelated to Javal's portfolio, politely redirect: "I'm best at helping with Javal's work and projects — want me to tell you about those instead?"
 
 ---
 
-LANGUAGE: English only. Never respond in any other language regardless of what the user writes.
-
-ROLE:
-You are the portfolio assistant for Javal Joseph's website (javal.dev). Your job is to help visitors learn about Javal's work, skills, services, and experience — and to help them navigate the site.
-
-TONE:
-Warm, enthusiastic, conversational — like a knowledgeable friend, not a corporate press release. Short sentences. Human feel.
-
-RESPONSE RULES:
-1. Keep every response to 2–3 sentences maximum.
-2. Never overwhelm the user with long paragraphs or lists.
-3. Always end with a gentle forward-moving prompt, for example:
-   - "Want me to take you there?"
-   - "Would you like to see more?"
-   - "Would you like me to show you that project?"
-   - "Can I take you to the contact section?"
-4. Never fabricate or guess any information not in the portfolio context above.
-5. If you don't know something, say so honestly and offer to direct the user to the contact section.
-6. Do not mention you are an AI assistant unless directly asked.
-
-NAVIGATION RULES — CRITICAL, DO NOT SKIP:
-1. You have two navigation tools: scroll_to_section and navigate_to_page.
-2. NEVER call a navigation tool without first asking the user for permission.
-3. Ask BEFORE navigating. Example:
-   User: "Take me to your projects."
-   You: "I can take you there! Want me to scroll you to the projects section?"
-   Wait for user to confirm with yes/sure/go ahead/ok before calling the tool.
-4. Only after explicit confirmation, call the navigation tool.
-5. If the destination does not exist, say so politely and offer the contact section instead.
+${PORTFOLIO_CONTEXT}
 
 AVAILABLE HOMEPAGE SECTIONS: hero, projects, about, services, contact
-AVAILABLE PROJECT PAGES (slugs): baloto-visual-agent, lotto-voice-agent, javal-dev, cazova, homeland-furnishings, utt-outreach, javtech-ltd, amcs-limited, the-harambee-house, ecliff-elie, a-team-band-tt, javal-protoverse
+AVAILABLE PROJECT SLUGS: baloto-visual-agent, lotto-voice-agent, javal-dev, cazova, homeland-furnishings, utt-outreach, javtech-ltd, amcs-limited, the-harambee-house, ecliff-elie, a-team-band-tt, javal-protoverse
 `.trim();
 
 const TOOLS = [
@@ -108,7 +103,7 @@ const TOOLS = [
 ];
 
 const GREETING_INSTRUCTION =
-  'Say exactly this in English: "Hi! I\'m Javal\'s portfolio assistant — ask me anything about his work, projects, or skills!" Do NOT call any navigation function.';
+  'Greet the visitor warmly in one sentence. Introduce yourself as Javal\'s portfolio assistant and invite them to ask about his work, projects, or skills. Keep it natural and concise. Do NOT call any navigation function.';
 
 // ── Hook ──────────────────────────────────────────────────────────
 
@@ -126,6 +121,7 @@ export function useVoiceAgent() {
   const pathnameRef = useRef(pathname);
   useEffect(() => { routerRef.current = router; }, [router]);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
+  useEffect(() => { statusRef.current = status; }, [status]);
 
   // WebRTC refs
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -137,6 +133,10 @@ export function useVoiceAgent() {
   const pendingNavRef = useRef<(() => void) | null>(null);
   // Action to fire after session.updated confirms the session is ready
   const pendingAfterSessionRef = useRef<string | null>(null); // 'greeting' | 'text:<content>'
+  // Prevents concurrent connect() calls during async token fetch
+  const isConnectingRef = useRef(false);
+  // Mirrors status state for use in high-frequency event handlers
+  const statusRef = useRef<AgentStatus>('idle');
 
   // ── Internal helpers ────────────────────────────────────────────
 
@@ -193,7 +193,12 @@ export function useVoiceAgent() {
         break;
       }
 
+      case 'response.audio.delta':
+        if (statusRef.current !== 'speaking') setStatus('speaking');
+        break;
+
       case 'input_audio_buffer.speech_started':
+        sendEvent({ type: 'response.cancel' });
         setStatus('listening');
         break;
 
@@ -206,7 +211,6 @@ export function useVoiceAgent() {
       case 'response.audio_transcript.done': {
         const ev = event as { transcript?: string };
         if (ev.transcript?.trim()) addEntry('agent', ev.transcript.trim());
-        setStatus('speaking');
         break;
       }
 
@@ -244,16 +248,18 @@ export function useVoiceAgent() {
               output: JSON.stringify({ success: true }),
             },
           });
+          // Prompt model to continue speaking after tool execution
+          sendEvent({ type: 'response.create' });
         }
         break;
       }
 
       case 'response.done': {
-        // Execute nav AFTER audio has finished playing
         if (pendingNavRef.current) {
           const nav = pendingNavRef.current;
           pendingNavRef.current = null;
-          setTimeout(nav, 300);
+          // Buffer for audio pipeline latency before navigating
+          setTimeout(nav, 1500);
         }
         setStatus('listening');
         break;
@@ -273,7 +279,8 @@ export function useVoiceAgent() {
   // ── Connect ────────────────────────────────────────────────────
 
   const connect = useCallback(async () => {
-    if (pcRef.current) return; // already connected
+    if (pcRef.current || isConnectingRef.current) return;
+    isConnectingRef.current = true;
 
     setStatus('connecting');
 
@@ -281,6 +288,7 @@ export function useVoiceAgent() {
     const tokenRes = await fetch('/api/realtime', { method: 'POST' });
     if (!tokenRes.ok) {
       console.error('[VoiceAgent] Failed to get token');
+      isConnectingRef.current = false;
       setStatus('idle');
       return;
     }
@@ -355,6 +363,7 @@ export function useVoiceAgent() {
 
     if (!sdpRes.ok) {
       console.error('[VoiceAgent] SDP exchange failed');
+      isConnectingRef.current = false;
       setStatus('idle');
       pcRef.current?.close();
       pcRef.current = null;
@@ -362,6 +371,7 @@ export function useVoiceAgent() {
     }
 
     await pc.setRemoteDescription({ type: 'answer', sdp: await sdpRes.text() });
+    isConnectingRef.current = false;
   }, [sendEvent]);
 
   // ── Public API ─────────────────────────────────────────────────
@@ -374,6 +384,7 @@ export function useVoiceAgent() {
 
   /** Disconnect the session but keep the widget open with history. */
   const stop = useCallback(() => {
+    isConnectingRef.current = false;
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     dcRef.current?.close();
