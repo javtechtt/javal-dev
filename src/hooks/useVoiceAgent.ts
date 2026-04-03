@@ -317,7 +317,7 @@ export function useVoiceAgent() {
         type: 'session.update',
         session: {
           instructions: SYSTEM_PROMPT,
-          voice: 'alloy',
+          voice: 'shimmer',
           input_audio_transcription: { model: 'whisper-1', language: 'en' },
           turn_detection: {
             type: 'server_vad',
