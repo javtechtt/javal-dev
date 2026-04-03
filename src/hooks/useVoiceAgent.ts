@@ -174,7 +174,6 @@ export function useVoiceAgent() {
         break;
 
       case 'input_audio_buffer.speech_started':
-        sendEvent({ type: 'response.cancel' });
         setStatus('listening');
         break;
 
@@ -304,9 +303,9 @@ export function useVoiceAgent() {
           input_audio_transcription: { model: 'whisper-1', language: 'en' },
           turn_detection: {
             type: 'server_vad',
-            threshold: 0.5,
+            threshold: 0.7,
             prefix_padding_ms: 300,
-            silence_duration_ms: 800,
+            silence_duration_ms: 600,
           },
           tools: TOOLS,
           tool_choice: 'auto',
