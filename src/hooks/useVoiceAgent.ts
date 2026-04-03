@@ -105,6 +105,13 @@ const TOOLS = [
 const GREETING_INSTRUCTION =
   'Greet the visitor warmly in one sentence. Introduce yourself as Javal\'s portfolio assistant and invite them to ask about his work, projects, or skills. Keep it natural and concise. Do NOT call any navigation function.';
 
+// Browser audio processing — critical for mobile echo prevention
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
 // ── Hook ──────────────────────────────────────────────────────────
 
 export function useVoiceAgent() {
@@ -116,9 +123,10 @@ export function useVoiceAgent() {
   const [isOpen, setIsOpen] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
 
-  // Stable refs — always hold latest values for use inside event handlers
+  // Stable refs for use inside event handlers (avoids stale closures)
   const routerRef = useRef(router);
   const pathnameRef = useRef(pathname);
+  const statusRef = useRef<AgentStatus>('idle');
   useEffect(() => { routerRef.current = router; }, [router]);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
   useEffect(() => { statusRef.current = status; }, [status]);
@@ -129,14 +137,12 @@ export function useVoiceAgent() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Pending navigation to execute after response audio completes
-  const pendingNavRef = useRef<(() => void) | null>(null);
-  // Action to fire after session.updated confirms the session is ready
-  const pendingAfterSessionRef = useRef<string | null>(null); // 'greeting' | 'text:<content>'
-  // Prevents concurrent connect() calls during async token fetch
+  // State guards
   const isConnectingRef = useRef(false);
-  // Mirrors status state for use in high-frequency event handlers
-  const statusRef = useRef<AgentStatus>('idle');
+  const isGreetingRef = useRef(false);
+  const userMutedRef = useRef(false); // tracks intentional user mute vs system mute
+  const pendingNavRef = useRef<(() => void) | null>(null);
+  const pendingTextRef = useRef<string | null>(null);
 
   // ── Internal helpers ────────────────────────────────────────────
 
@@ -153,19 +159,42 @@ export function useVoiceAgent() {
     ]);
   }, []);
 
-  const scheduleNav = useCallback((action: () => void) => {
-    pendingNavRef.current = action;
+  const setMicTracks = useCallback((enabled: boolean) => {
+    streamRef.current?.getTracks().forEach(t => { t.enabled = enabled; });
+    setMicEnabled(enabled);
   }, []);
 
   // ── Server event handler ────────────────────────────────────────
 
-  // Defined without useCallback — captured via ref below so dc.onmessage
-  // always calls the latest version without stale closures.
   const handleServerEvent = (event: Record<string, unknown>) => {
     switch (event.type) {
 
       case 'session.updated': {
-        setStatus('listening');
+        // Fire greeting or pending text (one-shot, guarded by isGreetingRef)
+        if (isGreetingRef.current) break; // already handled
+
+        const pending = pendingTextRef.current;
+        pendingTextRef.current = null;
+
+        if (pending) {
+          // Text was queued before connection — send it now
+          addEntry('user', pending);
+          sendEvent({
+            type: 'conversation.item.create',
+            item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: pending }] },
+          });
+          sendEvent({ type: 'response.create' });
+        } else {
+          // First connection — send greeting with mic muted
+          isGreetingRef.current = true;
+          sendEvent({
+            type: 'response.create',
+            response: {
+              instructions: GREETING_INSTRUCTION,
+              modalities: ['audio', 'text'],
+            },
+          });
+        }
         break;
       }
 
@@ -198,23 +227,22 @@ export function useVoiceAgent() {
           try {
             const args = JSON.parse(rawArgs ?? '{}') as Record<string, string>;
             if (name === 'scroll_to_section') {
-              scheduleNav(() => {
+              pendingNavRef.current = () => {
                 if (pathnameRef.current !== '/') {
                   routerRef.current.push(`/#${args.section}`);
                 } else {
                   document.getElementById(args.section)?.scrollIntoView({ behavior: 'smooth' });
                 }
-              });
+              };
             } else if (name === 'navigate_to_page') {
-              scheduleNav(() => {
+              pendingNavRef.current = () => {
                 routerRef.current.push(`/projects/${args.slug}`);
-              });
+              };
             }
           } catch {
             // ignore parse errors
           }
 
-          // Acknowledge function call back to model
           sendEvent({
             type: 'conversation.item.create',
             item: {
@@ -223,20 +251,27 @@ export function useVoiceAgent() {
               output: JSON.stringify({ success: true }),
             },
           });
-          // Prompt model to continue speaking after tool execution
           sendEvent({ type: 'response.create' });
         }
         break;
       }
 
       case 'response.done': {
+        // Execute pending navigation after audio finishes
         if (pendingNavRef.current) {
           const nav = pendingNavRef.current;
           pendingNavRef.current = null;
           setTimeout(nav, 1500);
         }
-        // Re-enable mic after agent finishes speaking
-        streamRef.current?.getTracks().forEach(t => { t.enabled = true; });
+
+        // Unmute mic after greeting completes (only if user hasn't manually muted)
+        if (isGreetingRef.current) {
+          isGreetingRef.current = false;
+          if (!userMutedRef.current) {
+            setMicTracks(true);
+          }
+        }
+
         setStatus('listening');
         break;
       }
@@ -247,9 +282,7 @@ export function useVoiceAgent() {
     }
   };
 
-  // Keep ref in sync so dc.onmessage always uses latest version
   const handleServerEventRef = useRef(handleServerEvent);
-  // Update ref on every render
   handleServerEventRef.current = handleServerEvent;
 
   // ── Connect ────────────────────────────────────────────────────
@@ -260,130 +293,118 @@ export function useVoiceAgent() {
 
     setStatus('connecting');
 
-    // 1. Get ephemeral token from our server
-    const tokenRes = await fetch('/api/realtime', { method: 'POST' });
-    if (!tokenRes.ok) {
-      console.error('[VoiceAgent] Failed to get token');
-      isConnectingRef.current = false;
-      setStatus('idle');
-      return;
-    }
-    const { client_secret } = await tokenRes.json() as { client_secret: { value: string } };
-    const ephemeralKey = client_secret.value;
+    try {
+      // 1. Ephemeral token
+      const tokenRes = await fetch('/api/realtime', { method: 'POST' });
+      if (!tokenRes.ok) {
+        console.error('[VoiceAgent] Token fetch failed:', tokenRes.status);
+        setStatus('idle');
+        return;
+      }
+      const { client_secret } = await tokenRes.json() as { client_secret: { value: string } };
 
-    // 2. Create peer connection
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
+      // 2. Peer connection
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
 
-    // 3. Audio output — must use createElement + appendChild for autoplay to work
-    const audio = document.createElement('audio');
-    audio.autoplay = true;
-    document.body.appendChild(audio);
-    audioRef.current = audio;
-    pc.ontrack = (e) => { audio.srcObject = e.streams[0]; };
+      // 3. Audio output
+      const audio = document.createElement('audio');
+      audio.autoplay = true;
+      document.body.appendChild(audio);
+      audioRef.current = audio;
+      pc.ontrack = (e) => { audio.srcObject = e.streams[0]; };
 
-    // 4. Mic input — enabled by default
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
-    stream.getTracks().forEach(track => {
-      track.enabled = true;
-      pc.addTrack(track, stream);
-    });
-    setMicEnabled(true);
-
-    // 5. Data channel for events
-    const dc = pc.createDataChannel('oai-events');
-    dcRef.current = dc;
-
-    dc.onopen = () => {
-      sendEvent({
-        type: 'session.update',
-        session: {
-          instructions: SYSTEM_PROMPT,
-          voice: 'shimmer',
-          input_audio_transcription: { model: 'whisper-1', language: 'en' },
-          turn_detection: {
-            type: 'server_vad',
-            threshold: 0.8,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 600,
-          },
-          tools: TOOLS,
-          tool_choice: 'auto',
-          modalities: ['audio', 'text'],
-        },
+      // 4. Mic input — starts muted, unmutes after greeting via response.done
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS });
+      streamRef.current = stream;
+      stream.getTracks().forEach(track => {
+        track.enabled = false;
+        pc.addTrack(track, stream);
       });
+      setMicEnabled(false);
 
-      // Fire greeting or pending text after a short delay to let session.update settle
-      setTimeout(() => {
-        const pending = pendingAfterSessionRef.current;
-        pendingAfterSessionRef.current = null;
+      // 5. Data channel
+      const dc = pc.createDataChannel('oai-events');
+      dcRef.current = dc;
 
-        if (pending?.startsWith('text:')) {
-          const text = pending.slice(5);
-          sendEvent({
-            type: 'conversation.item.create',
-            item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
-          });
-          sendEvent({ type: 'response.create' });
-        } else {
-          // Mute mic during greeting to prevent echo feedback on mobile
-          streamRef.current?.getTracks().forEach(t => { t.enabled = false; });
-          sendEvent({
-            type: 'response.create',
-            response: {
-              instructions: GREETING_INSTRUCTION,
-              modalities: ['audio', 'text'],
+      dc.onopen = () => {
+        sendEvent({
+          type: 'session.update',
+          session: {
+            instructions: SYSTEM_PROMPT,
+            voice: 'shimmer',
+            input_audio_transcription: { model: 'whisper-1', language: 'en' },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.8,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 600,
             },
-          });
-        }
-      }, 500);
-    };
+            tools: TOOLS,
+            tool_choice: 'auto',
+            modalities: ['audio', 'text'],
+          },
+        });
+        // session.updated handler fires greeting or pending text
+      };
 
-    dc.onmessage = (e) => {
-      handleServerEventRef.current(JSON.parse(e.data as string));
-    };
+      dc.onmessage = (e) => {
+        handleServerEventRef.current(JSON.parse(e.data as string));
+      };
 
-    // 6. SDP handshake
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      // 6. SDP handshake
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-    const sdpRes = await fetch(
-      `https://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${ephemeralKey}`,
-          'Content-Type': 'application/sdp',
+      const sdpRes = await fetch(
+        `https://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${client_secret.value}`,
+            'Content-Type': 'application/sdp',
+          },
+          body: offer.sdp,
         },
-        body: offer.sdp,
-      },
-    );
+      );
 
-    if (!sdpRes.ok) {
-      console.error('[VoiceAgent] SDP exchange failed');
-      isConnectingRef.current = false;
-      setStatus('idle');
+      if (!sdpRes.ok) {
+        console.error('[VoiceAgent] SDP exchange failed:', sdpRes.status);
+        pc.close();
+        pcRef.current = null;
+        setStatus('idle');
+        return;
+      }
+
+      await pc.setRemoteDescription({ type: 'answer', sdp: await sdpRes.text() });
+    } catch (err) {
+      console.error('[VoiceAgent] Connection error:', err);
       pcRef.current?.close();
       pcRef.current = null;
-      return;
+      dcRef.current = null;
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      audioRef.current?.remove();
+      audioRef.current = null;
+      setStatus('idle');
+    } finally {
+      isConnectingRef.current = false;
     }
-
-    await pc.setRemoteDescription({ type: 'answer', sdp: await sdpRes.text() });
-    isConnectingRef.current = false;
   }, [sendEvent]);
 
   // ── Public API ─────────────────────────────────────────────────
 
-  /** Open the widget and start the session. */
   const start = useCallback(async () => {
     setIsOpen(true);
     await connect();
   }, [connect]);
 
-  /** Disconnect the session but keep the widget open with history. */
   const stop = useCallback(() => {
     isConnectingRef.current = false;
+    isGreetingRef.current = false;
+    userMutedRef.current = false;
+    pendingNavRef.current = null;
+    pendingTextRef.current = null;
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     dcRef.current?.close();
@@ -398,7 +419,6 @@ export function useVoiceAgent() {
     setStatus('stopped');
   }, []);
 
-  /** Stop and fully close+clear the widget. */
   const close = useCallback(() => {
     stop();
     setIsOpen(false);
@@ -406,27 +426,23 @@ export function useVoiceAgent() {
     setStatus('idle');
   }, [stop]);
 
-  /** Toggle push-to-talk mic. */
   const toggleMic = useCallback(() => {
     if (!streamRef.current) return;
-    const tracks = streamRef.current.getTracks();
     if (micEnabled) {
-      tracks.forEach(t => { t.enabled = false; });
-      setMicEnabled(false);
+      setMicTracks(false);
+      userMutedRef.current = true;
     } else {
       sendEvent({ type: 'input_audio_buffer.clear' });
-      tracks.forEach(t => { t.enabled = true; });
-      setMicEnabled(true);
+      setMicTracks(true);
+      userMutedRef.current = false;
       setStatus('listening');
     }
-  }, [micEnabled, sendEvent]);
+  }, [micEnabled, sendEvent, setMicTracks]);
 
-  /** Send a text message to the agent. */
   const sendText = useCallback((text: string) => {
     if (!text.trim()) return;
     if (!pcRef.current) {
-      // Not connected — connect first, then send after session.updated
-      pendingAfterSessionRef.current = `text:${text}`;
+      pendingTextRef.current = text;
       connect();
       return;
     }
