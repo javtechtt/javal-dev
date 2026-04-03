@@ -298,13 +298,14 @@ export function useVoiceAgent() {
     audioRef.current = audio;
     pc.ontrack = (e) => { audio.srcObject = e.streams[0]; };
 
-    // 4. Mic input — disabled by default (push-to-talk)
+    // 4. Mic input — enabled by default
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
     stream.getTracks().forEach(track => {
-      track.enabled = false; // muted until user presses mic
+      track.enabled = true;
       pc.addTrack(track, stream);
     });
+    setMicEnabled(true);
 
     // 5. Data channel for events
     const dc = pc.createDataChannel('oai-events');
