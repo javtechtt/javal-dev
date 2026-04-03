@@ -233,9 +233,10 @@ export function useVoiceAgent() {
         if (pendingNavRef.current) {
           const nav = pendingNavRef.current;
           pendingNavRef.current = null;
-          // Buffer for audio pipeline latency before navigating
           setTimeout(nav, 1500);
         }
+        // Re-enable mic after agent finishes speaking
+        streamRef.current?.getTracks().forEach(t => { t.enabled = true; });
         setStatus('listening');
         break;
       }
@@ -303,7 +304,7 @@ export function useVoiceAgent() {
           input_audio_transcription: { model: 'whisper-1', language: 'en' },
           turn_detection: {
             type: 'server_vad',
-            threshold: 0.7,
+            threshold: 0.8,
             prefix_padding_ms: 300,
             silence_duration_ms: 600,
           },
@@ -326,7 +327,8 @@ export function useVoiceAgent() {
           });
           sendEvent({ type: 'response.create' });
         } else {
-          // Default: send greeting
+          // Mute mic during greeting to prevent echo feedback on mobile
+          streamRef.current?.getTracks().forEach(t => { t.enabled = false; });
           sendEvent({
             type: 'response.create',
             response: {
