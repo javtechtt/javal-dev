@@ -72,7 +72,7 @@ export default function FloatingVoiceAgent() {
         exit={{ opacity: 0, scale: 0.8 }}
         transition={{ type: 'spring', stiffness: 400, damping: 28 }}
         onClick={() => setMinimized(false)}
-        className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center cursor-pointer group"
+        className="fixed bottom-6 left-6 z-50 w-12 h-12 rounded-full flex items-center justify-center cursor-pointer group"
         style={{
           background: 'rgba(13, 13, 26, 0.92)',
           backdropFilter: 'blur(20px)',
@@ -113,7 +113,7 @@ export default function FloatingVoiceAgent() {
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 24, scale: 0.95 }}
         transition={{ type: 'spring', stiffness: 340, damping: 30 }}
-        className="fixed bottom-6 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[340px] flex flex-col max-h-[70vh]"
+        className="fixed bottom-6 left-4 sm:left-6 z-50 w-[calc(100vw-2rem)] sm:w-[340px] flex flex-col max-h-[70vh]"
         style={{
           background: 'rgba(13, 13, 26, 0.92)',
           backdropFilter: 'blur(20px)',
