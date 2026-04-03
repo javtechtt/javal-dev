@@ -17,15 +17,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'javal.dev — Digital Creative & UI/UX Developer',
+  title: 'javal.dev — AI Agent Developer & UI/UX Engineer',
   description:
-    'Portfolio of Javal — a digital creative and UI/UX developer crafting premium web experiences. Available for freelance and collaborative projects.',
-  keywords: ['UI/UX', 'Web Design', 'Next.js', 'Frontend Developer', 'Portfolio'],
-  authors: [{ name: 'Javal' }],
+    'Building intelligent web products at the intersection of AI, UX, and modern web development.',
+  keywords: ['AI Agent Developer', 'UI/UX Engineer', 'Next.js', 'Web Development', 'Portfolio'],
+  authors: [{ name: 'Javal Joseph' }],
+  icons: {
+    icon: '/favicon.svg',
+  },
   openGraph: {
-    title: 'javal.dev — Digital Creative & UI/UX Developer',
-    description: 'Premium web experiences crafted with design and code.',
+    title: 'javal.dev — AI Agent Developer & UI/UX Engineer',
+    description: 'Building intelligent web products at the intersection of AI, UX, and modern web development.',
     type: 'website',
+    url: 'https://javal.dev',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'javal.dev — AI Agent Developer & UI/UX Engineer',
+    description: 'Building intelligent web products at the intersection of AI, UX, and modern web development.',
   },
 };
 
