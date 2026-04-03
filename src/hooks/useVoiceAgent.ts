@@ -199,7 +199,11 @@ export function useVoiceAgent() {
         break;
 
       case 'response.audio.delta':
-        if (statusRef.current !== 'speaking') setStatus('speaking');
+        if (statusRef.current !== 'speaking') {
+          setStatus('speaking');
+          // Mute mic while agent speaks to prevent echo feedback on mobile
+          streamRef.current?.getTracks().forEach(t => { t.enabled = false; });
+        }
         break;
 
       case 'input_audio_buffer.speech_started':
@@ -276,7 +280,6 @@ export function useVoiceAgent() {
       }
 
       case 'response.done': {
-        // Mark when agent stopped speaking for echo window calculation
         lastSpeechEndRef.current = Date.now();
 
         if (pendingNavRef.current) {
@@ -287,7 +290,7 @@ export function useVoiceAgent() {
 
         if (isGreetingRef.current) {
           isGreetingRef.current = false;
-          // Wait 5s for audio buffer to fully drain, then enable VAD + unmute mic
+          // Greeting: longer delay, then enable VAD + unmute
           setTimeout(() => {
             sendEvent({
               type: 'session.update',
@@ -304,9 +307,16 @@ export function useVoiceAgent() {
               setMicTracks(true);
             }
             setStatus('listening');
-          }, 5000);
+          }, 3000);
         } else {
-          setStatus('listening');
+          // Normal response: unmute after short buffer for audio drain
+          setTimeout(() => {
+            if (!userMutedRef.current && statusRef.current !== 'speaking') {
+              streamRef.current?.getTracks().forEach(t => { t.enabled = true; });
+              setMicEnabled(true);
+            }
+            setStatus('listening');
+          }, 1500);
         }
         break;
       }
