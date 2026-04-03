@@ -165,30 +165,6 @@ export function useVoiceAgent() {
     switch (event.type) {
 
       case 'session.updated': {
-        const pending = pendingAfterSessionRef.current;
-        pendingAfterSessionRef.current = null;
-
-        if (pending === 'greeting') {
-          sendEvent({
-            type: 'response.create',
-            response: {
-              instructions: GREETING_INSTRUCTION,
-              modalities: ['audio', 'text'],
-            },
-          });
-        } else if (pending?.startsWith('text:')) {
-          const text = pending.slice(5);
-          sendEvent({
-            type: 'conversation.item.create',
-            item: {
-              type: 'message',
-              role: 'user',
-              content: [{ type: 'input_text', text }],
-            },
-          });
-          sendEvent({ type: 'response.create' });
-        }
-
         setStatus('listening');
         break;
       }
@@ -320,7 +296,6 @@ export function useVoiceAgent() {
     dcRef.current = dc;
 
     dc.onopen = () => {
-      // Configure session — greeting fires after session.updated
       sendEvent({
         type: 'session.update',
         session: {
@@ -338,7 +313,30 @@ export function useVoiceAgent() {
           modalities: ['audio', 'text'],
         },
       });
-      pendingAfterSessionRef.current = 'greeting';
+
+      // Fire greeting or pending text after a short delay to let session.update settle
+      setTimeout(() => {
+        const pending = pendingAfterSessionRef.current;
+        pendingAfterSessionRef.current = null;
+
+        if (pending?.startsWith('text:')) {
+          const text = pending.slice(5);
+          sendEvent({
+            type: 'conversation.item.create',
+            item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+          });
+          sendEvent({ type: 'response.create' });
+        } else {
+          // Default: send greeting
+          sendEvent({
+            type: 'response.create',
+            response: {
+              instructions: GREETING_INSTRUCTION,
+              modalities: ['audio', 'text'],
+            },
+          });
+        }
+      }, 500);
     };
 
     dc.onmessage = (e) => {
