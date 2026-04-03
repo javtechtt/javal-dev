@@ -169,34 +169,8 @@ export function useVoiceAgent() {
   const handleServerEvent = (event: Record<string, unknown>) => {
     switch (event.type) {
 
-      case 'session.updated': {
-        // Fire greeting or pending text (one-shot, guarded by isGreetingRef)
-        if (isGreetingRef.current) break; // already handled
-
-        const pending = pendingTextRef.current;
-        pendingTextRef.current = null;
-
-        if (pending) {
-          // Text was queued before connection — send it now
-          addEntry('user', pending);
-          sendEvent({
-            type: 'conversation.item.create',
-            item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: pending }] },
-          });
-          sendEvent({ type: 'response.create' });
-        } else {
-          // First connection — send greeting with mic muted
-          isGreetingRef.current = true;
-          sendEvent({
-            type: 'response.create',
-            response: {
-              instructions: GREETING_INSTRUCTION,
-              modalities: ['audio', 'text'],
-            },
-          });
-        }
+      case 'session.updated':
         break;
-      }
 
       case 'response.audio.delta':
         if (statusRef.current !== 'speaking') setStatus('speaking');
@@ -257,22 +231,35 @@ export function useVoiceAgent() {
       }
 
       case 'response.done': {
-        // Execute pending navigation after audio finishes
         if (pendingNavRef.current) {
           const nav = pendingNavRef.current;
           pendingNavRef.current = null;
           setTimeout(nav, 1500);
         }
 
-        // Unmute mic after greeting completes (only if user hasn't manually muted)
         if (isGreetingRef.current) {
           isGreetingRef.current = false;
-          if (!userMutedRef.current) {
-            setMicTracks(true);
-          }
+          // Wait for audio buffer to drain, then enable VAD + unmute mic
+          setTimeout(() => {
+            sendEvent({
+              type: 'session.update',
+              session: {
+                turn_detection: {
+                  type: 'server_vad',
+                  threshold: 0.8,
+                  prefix_padding_ms: 300,
+                  silence_duration_ms: 600,
+                },
+              },
+            });
+            if (!userMutedRef.current) {
+              setMicTracks(true);
+            }
+            setStatus('listening');
+          }, 2000);
+        } else {
+          setStatus('listening');
         }
-
-        setStatus('listening');
         break;
       }
 
@@ -328,24 +315,41 @@ export function useVoiceAgent() {
       dcRef.current = dc;
 
       dc.onopen = () => {
+        // Configure session with turn detection OFF during greeting
         sendEvent({
           type: 'session.update',
           session: {
             instructions: SYSTEM_PROMPT,
             voice: 'shimmer',
             input_audio_transcription: { model: 'whisper-1', language: 'en' },
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.8,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 600,
-            },
+            turn_detection: null, // disabled until greeting finishes
             tools: TOOLS,
             tool_choice: 'auto',
             modalities: ['audio', 'text'],
           },
         });
-        // session.updated handler fires greeting or pending text
+
+        // Fire greeting or pending text
+        const pending = pendingTextRef.current;
+        pendingTextRef.current = null;
+
+        if (pending) {
+          addEntry('user', pending);
+          sendEvent({
+            type: 'conversation.item.create',
+            item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: pending }] },
+          });
+          sendEvent({ type: 'response.create' });
+        } else {
+          isGreetingRef.current = true;
+          sendEvent({
+            type: 'response.create',
+            response: {
+              instructions: GREETING_INSTRUCTION,
+              modalities: ['audio', 'text'],
+            },
+          });
+        }
       };
 
       dc.onmessage = (e) => {
