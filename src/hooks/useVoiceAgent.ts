@@ -239,7 +239,7 @@ export function useVoiceAgent() {
 
         if (isGreetingRef.current) {
           isGreetingRef.current = false;
-          // Wait for audio buffer to drain, then enable VAD + unmute mic
+          // Wait 5s for audio buffer to fully drain, then enable VAD + unmute mic
           setTimeout(() => {
             sendEvent({
               type: 'session.update',
@@ -256,7 +256,7 @@ export function useVoiceAgent() {
               setMicTracks(true);
             }
             setStatus('listening');
-          }, 2000);
+          }, 5000);
         } else {
           setStatus('listening');
         }
