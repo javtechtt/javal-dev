@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { PORTFOLIO_CONTEXT } from '@/lib/portfolioContext';
+import {
+  AgentUtteranceBuffer,
+  shouldIgnoreTranscript,
+  DEFAULT_CONFIG,
+  type EchoFilterConfig,
+} from '@/lib/echoFilter';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -158,6 +164,11 @@ export function useVoiceAgent() {
   const pendingNavRef = useRef<(() => void) | null>(null);
   const pendingTextRef = useRef<string | null>(null);
 
+  // Echo filter — prevents agent from responding to its own voice on mobile
+  const echoFilterConfig = useRef<EchoFilterConfig>({ ...DEFAULT_CONFIG, debug: true });
+  const agentUtteranceBuffer = useRef(new AgentUtteranceBuffer(DEFAULT_CONFIG.bufferSize));
+  const lastSpeechEndRef = useRef<number | null>(null);
+
   // ── Internal helpers ────────────────────────────────────────────
 
   const sendEvent = useCallback((event: object) => {
@@ -196,13 +207,32 @@ export function useVoiceAgent() {
 
       case 'conversation.item.input_audio_transcription.completed': {
         const ev = event as { transcript?: string };
-        if (ev.transcript?.trim()) addEntry('user', ev.transcript.trim());
+        const text = ev.transcript?.trim();
+        if (!text) break;
+
+        // Run echo filter — suppress transcripts that match agent's own speech
+        const filterResult = shouldIgnoreTranscript(
+          text,
+          agentUtteranceBuffer.current,
+          statusRef.current === 'speaking',
+          lastSpeechEndRef.current,
+          echoFilterConfig.current,
+        );
+
+        if (filterResult.ignore) break; // drop echoed transcript
+
+        addEntry('user', text);
         break;
       }
 
       case 'response.audio_transcript.done': {
         const ev = event as { transcript?: string };
-        if (ev.transcript?.trim()) addEntry('agent', ev.transcript.trim());
+        const text = ev.transcript?.trim();
+        if (text) {
+          addEntry('agent', text);
+          // Record in echo filter buffer so future mic input can be compared
+          agentUtteranceBuffer.current.push(text);
+        }
         break;
       }
 
@@ -245,6 +275,9 @@ export function useVoiceAgent() {
       }
 
       case 'response.done': {
+        // Mark when agent stopped speaking for echo window calculation
+        lastSpeechEndRef.current = Date.now();
+
         if (pendingNavRef.current) {
           const nav = pendingNavRef.current;
           pendingNavRef.current = null;
@@ -423,6 +456,8 @@ export function useVoiceAgent() {
     userMutedRef.current = false;
     pendingNavRef.current = null;
     pendingTextRef.current = null;
+    agentUtteranceBuffer.current.clear();
+    lastSpeechEndRef.current = null;
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     dcRef.current?.close();
