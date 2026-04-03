@@ -1,9 +1,10 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ArrowDown, Sparkles } from 'lucide-react';
+import { ArrowDown, Sparkles, Mic } from 'lucide-react';
 import GlowButton from '@/components/ui/GlowButton';
 import { AnimatedWords } from '@/components/ui/AnimatedText';
+import { useVoiceAgentContext } from '@/context/VoiceAgentContext';
 
 const stats = [
   { value: '100+', label: 'Projects delivered' },
@@ -12,6 +13,8 @@ const stats = [
 ];
 
 export default function HeroSection() {
+  const { start, close, isOpen, status } = useVoiceAgentContext();
+
   const scrollToWork = () => {
     document.getElementById('projects')?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -19,6 +22,8 @@ export default function HeroSection() {
   const scrollToContact = () => {
     document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  const isAgentActive = isOpen || status !== 'idle';
 
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden px-6 pt-24 pb-24">
@@ -106,7 +111,7 @@ export default function HeroSection() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.9 }}
-          className="flex flex-wrap items-center justify-center gap-4 mb-16"
+          className="flex flex-wrap items-center justify-center gap-4 mb-10"
         >
           <GlowButton variant="primary" size="lg" icon onClick={scrollToWork}>
             View my work
@@ -116,12 +121,75 @@ export default function HeroSection() {
           </GlowButton>
         </motion.div>
 
+        {/* Voice Agent Trigger */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 1.0 }}
+          className="flex flex-col items-center gap-3 mb-16"
+        >
+          <button
+            onClick={isAgentActive ? close : start}
+            aria-label={isAgentActive ? 'Close assistant' : 'Talk to portfolio assistant'}
+            className="group relative flex items-center gap-3 px-5 py-3 rounded-2xl transition-all duration-300 disabled:cursor-default"
+            style={{
+              background: isAgentActive
+                ? 'rgba(34,211,238,0.08)'
+                : 'rgba(255,255,255,0.04)',
+              border: isAgentActive
+                ? '1px solid rgba(34,211,238,0.3)'
+                : '1px solid rgba(255,255,255,0.08)',
+              boxShadow: isAgentActive
+                ? '0 0 24px rgba(34,211,238,0.12)'
+                : 'none',
+            }}
+          >
+            {/* Mic icon with pulse ring */}
+            <span className="relative flex items-center justify-center w-8 h-8">
+              {isAgentActive && (
+                <span
+                  className="absolute inset-0 rounded-full animate-ping opacity-40"
+                  style={{ background: 'rgba(34,211,238,0.35)' }}
+                />
+              )}
+              <span
+                className="relative flex items-center justify-center w-8 h-8 rounded-full transition-all duration-300"
+                style={{
+                  background: isAgentActive
+                    ? 'rgba(34,211,238,0.2)'
+                    : 'rgba(255,255,255,0.06)',
+                  border: isAgentActive
+                    ? '1px solid rgba(34,211,238,0.4)'
+                    : '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <Mic
+                  size={15}
+                  style={{ color: isAgentActive ? '#22d3ee' : '#64748b' }}
+                />
+              </span>
+            </span>
+
+            <span className="flex flex-col items-start">
+              <span
+                className="text-xs font-semibold tracking-wide transition-colors"
+                style={{ color: isAgentActive ? '#22d3ee' : '#94a3b8' }}
+              >
+                {isAgentActive ? 'Close assistant' : 'Ask me anything'}
+              </span>
+              <span className="text-[10px] text-slate-600">
+                {isAgentActive ? 'Click to end session' : 'Voice-powered portfolio guide'}
+              </span>
+            </span>
+          </button>
+        </motion.div>
+
         {/* Stats */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 1.05 }}
-          className="flex items-center justify-center gap-8 md:gap-16 mb-12"
+          transition={{ duration: 0.5, delay: 1.1 }}
+          className="flex items-center justify-center gap-8 md:gap-16"
         >
           {stats.map((stat, i) => (
             <div key={i} className="text-center">
