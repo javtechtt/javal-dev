@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { PORTFOLIO_CONTEXT } from '@/lib/portfolioContext';
+import { fetchWithRetry } from '@/lib/retry';
 import {
   AgentUtteranceBuffer,
   shouldIgnoreTranscript,
@@ -328,8 +329,13 @@ export function useVoiceAgent() {
     setStatus('connecting');
 
     try {
-      // 1. Ephemeral token
-      const tokenRes = await fetch('/api/realtime', { method: 'POST' });
+      // 1. Ephemeral token (retries transient 5xx from our server route)
+      const tokenRes = await fetchWithRetry(
+        '/api/realtime',
+        { method: 'POST' },
+        { maxRetries: 3, initialDelayMs: 600, timeoutMs: 12000 },
+        'ephemeral token',
+      );
       if (!tokenRes.ok) {
         console.error('[VoiceAgent] Token fetch failed:', tokenRes.status);
         setStatus('idle');
@@ -403,11 +409,11 @@ export function useVoiceAgent() {
         handleServerEventRef.current(JSON.parse(e.data as string));
       };
 
-      // 6. SDP handshake
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const sdpRes = await fetch(
+      // 6. SDP handshake (retries transient 5xx from OpenAI)
+      const sdpRes = await fetchWithRetry(
         `https://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`,
         {
           method: 'POST',
@@ -417,6 +423,8 @@ export function useVoiceAgent() {
           },
           body: offer.sdp,
         },
+        { maxRetries: 2, initialDelayMs: 800, timeoutMs: 10000 },
+        'SDP exchange',
       );
 
       if (!sdpRes.ok) {
